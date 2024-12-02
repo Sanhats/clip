@@ -1,7 +1,9 @@
 import cv2
+import numpy as np
 import sys
 import os
 import time
+from moviepy.editor import VideoFileClip, concatenate_videoclips
 
 def process_video(input_path, debug=True):
     video = cv2.VideoCapture(input_path)
@@ -24,16 +26,12 @@ def process_video(input_path, debug=True):
     
     face_cascade = cv2.CascadeClassifier(cv2.data.haarcascades + 'haarcascade_frontalface_default.xml')
     
-    # Generate output filename
     base_name = os.path.splitext(os.path.basename(input_path))[0]
     output_path = os.path.join(os.path.dirname(input_path), f"{base_name}_highlights.mp4")
     
-    fourcc = cv2.VideoWriter_fourcc(*'mp4v')
-    out = cv2.VideoWriter(output_path, fourcc, fps, (width, height))
-    
+    selected_frames = []
     frame_count = 0
     faces_detected = 0
-    selected_frames = 0
     start_time = time.time()
     
     while True:
@@ -47,8 +45,7 @@ def process_video(input_path, debug=True):
             
             if len(faces) > 0:
                 faces_detected += 1
-                out.write(frame)
-                selected_frames += 1
+                selected_frames.append(frame_count)
                 if debug:
                     print(f"Frame {frame_count}: Found {len(faces)} faces")
         
@@ -58,22 +55,27 @@ def process_video(input_path, debug=True):
             progress = (frame_count / total_frames) * 100
             print(f"Progress: {progress:.1f}%")
     
+    video.release()
+    
     processing_time = time.time() - start_time
     
     if debug:
         print(f"\nProcessing Complete:")
         print(f"Total frames processed: {frame_count}")
         print(f"Frames with faces: {faces_detected}")
-        print(f"Frames selected for highlight: {selected_frames}")
+        print(f"Frames selected for highlight: {len(selected_frames)}")
         print(f"Processing time: {processing_time:.2f} seconds")
     
-    video.release()
-    out.release()
-    
     # If less than 1% of frames were selected, return None to indicate no significant highlights
-    if selected_frames < (total_frames * 0.01):
+    if len(selected_frames) < (total_frames * 0.01):
         print("Not enough highlights found. Returning original video.")
         return None
+    
+    # Use moviepy to extract clips and preserve audio
+    video = VideoFileClip(input_path)
+    clips = [video.subclip(t/fps, t/fps + 1) for t in selected_frames]
+    final_clip = concatenate_videoclips(clips)
+    final_clip.write_videofile(output_path, codec='libx264', audio_codec='aac')
     
     print(f"Highlights saved to: {output_path}")
     return output_path

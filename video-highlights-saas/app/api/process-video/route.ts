@@ -20,8 +20,30 @@ function sanitizeFilename(filename: string) {
     .toLowerCase()
 }
 
+async function checkPythonDependencies() {
+  try {
+    await execAsync('python -c "import moviepy.editor"')
+    return true
+  } catch (error) {
+    console.error('MoviePy not installed:', error)
+    return false
+  }
+}
+
 export async function POST(req: NextRequest) {
   try {
+    // Verificar dependencias de Python
+    const dependenciesInstalled = await checkPythonDependencies()
+    if (!dependenciesInstalled) {
+      return NextResponse.json(
+        { 
+          success: false, 
+          error: 'Required Python dependencies are not installed. Please run: pip install moviepy numpy opencv-python'
+        },
+        { status: 500 }
+      )
+    }
+
     const data = await req.formData()
     const useTestVideo = data.get('useTestVideo') === 'true'
     const file: File | null = useTestVideo ? null : (data.get('video') as unknown as File)
@@ -94,7 +116,12 @@ export async function POST(req: NextRequest) {
     } catch (error) {
       console.error('Error processing video:', error)
       return NextResponse.json(
-        { success: false, error: 'Failed to process video', details: error },
+        { 
+          success: false, 
+          error: 'Failed to process video', 
+          details: error,
+          message: 'Make sure all Python dependencies are installed correctly.'
+        },
         { status: 500 }
       )
     }
