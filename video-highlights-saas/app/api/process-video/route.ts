@@ -7,10 +7,29 @@ import { existsSync } from 'fs'
 
 const execAsync = promisify(exec)
 
-async function ensureDir(dirPath: string) {
-  if (!existsSync(dirPath)) {
-    await mkdir(dirPath, { recursive: true })
+async function ensureTestVideo() {
+  const publicDir = join(process.cwd(), 'public')
+  const tmpDir = join(process.cwd(), 'tmp')
+  const testVideoPath = join(publicDir, 'test-video.mp4')
+  
+  await mkdir(publicDir, { recursive: true })
+  await mkdir(tmpDir, { recursive: true })
+
+  if (!existsSync(testVideoPath)) {
+    try {
+      await execAsync(
+        'ffmpeg -f lavfi -i testsrc=duration=5:size=1280x720:rate=30 ' +
+        '-vf "drawtext=text=\'Test Video\':fontsize=60:fontcolor=white:x=(w-text_w)/2:y=(h-text_h)/2" ' +
+        `-y "${testVideoPath}"`
+      )
+      console.log('Created test video successfully')
+    } catch (error) {
+      console.error('Failed to create test video:', error)
+      throw new Error('Failed to create test video')
+    }
   }
+
+  return testVideoPath
 }
 
 function sanitizeFilename(filename: string) {
@@ -20,53 +39,34 @@ function sanitizeFilename(filename: string) {
     .toLowerCase()
 }
 
-async function checkPythonDependencies() {
-  try {
-    await execAsync('python -c "import moviepy.editor"')
-    return true
-  } catch (error) {
-    console.error('MoviePy not installed:', error)
-    return false
-  }
-}
-
 export async function POST(req: NextRequest) {
   try {
-    // Verificar dependencias de Python
-    const dependenciesInstalled = await checkPythonDependencies()
-    if (!dependenciesInstalled) {
-      return NextResponse.json(
-        { 
-          success: false, 
-          error: 'Required Python dependencies are not installed. Please run: pip install moviepy numpy opencv-python'
-        },
-        { status: 500 }
-      )
-    }
-
     const data = await req.formData()
     const useTestVideo = data.get('useTestVideo') === 'true'
     const file: File | null = useTestVideo ? null : (data.get('video') as unknown as File)
 
     const tmpDir = join(process.cwd(), 'tmp')
-    await ensureDir(tmpDir)
+    await mkdir(tmpDir, { recursive: true })
 
     let videoPath: string
     let originalFilename: string
 
     if (useTestVideo) {
-      const testVideoPath = join(process.cwd(), 'public', 'test-video.mp4')
-      originalFilename = 'test-video.mp4'
-      videoPath = join(tmpDir, originalFilename)
-      
-      if (!existsSync(testVideoPath)) {
+      try {
+        const testVideoPath = await ensureTestVideo()
+        originalFilename = 'test-video.mp4'
+        videoPath = join(tmpDir, originalFilename)
+        await copyFile(testVideoPath, videoPath)
+      } catch (error) {
         return NextResponse.json(
-          { success: false, error: 'Test video not found' },
-          { status: 404 }
+          { 
+            success: false, 
+            error: 'Failed to setup test video',
+            details: error
+          },
+          { status: 500 }
         )
       }
-
-      await copyFile(testVideoPath, videoPath)
     } else {
       if (!file) {
         return NextResponse.json(
@@ -105,7 +105,7 @@ export async function POST(req: NextRequest) {
         return NextResponse.json({ 
           success: true, 
           noHighlights: true,
-          message: "No significant highlights found. Original video returned.",
+          message: "No significant highlights found or error occurred. Original video returned.",
           downloadUrl: `/api/download?file=${encodeURIComponent(originalFilename)}`,
           debug: {
             stdout,
@@ -120,17 +120,19 @@ export async function POST(req: NextRequest) {
           success: false, 
           error: 'Failed to process video', 
           details: error,
-          message: 'Make sure all Python dependencies are installed correctly.'
+          message: 'An error occurred during video processing. Please check the server logs for more information.'
         },
         { status: 500 }
       )
     }
   } catch (error) {
-    console.error('Error handling upload:', error)
-    return NextResponse.json(
-      { success: false, error: 'Internal server error', details: error },
-      { status: 500 }
-    )
+    console.error('Error in process-video route:', error)
+    return NextResponse.json({
+      success: false,
+      error: 'Internal server error',
+      details: error,
+      message: 'An unexpected error occurred. Please try again later or contact support.'
+    }, { status: 500 })
   }
 }
 

@@ -1,27 +1,31 @@
 'use client'
 
 import { useState } from 'react'
+import { AlertCircle } from 'lucide-react'
 import axios from 'axios'
 
 export default function Home() {
   const [file, setFile] = useState<File | null>(null)
   const [processing, setProcessing] = useState(false)
   const [downloadUrl, setDownloadUrl] = useState<string | null>(null)
-  const [debugInfo, setDebugInfo] = useState<string | null>(null)
+  const [error, setError] = useState<{
+    message: string;
+    instructions?: string[];
+  } | null>(null)
   const [isDevelopment, setIsDevelopment] = useState(false)
-  const [noHighlights, setNoHighlights] = useState(false)
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files) {
       setFile(e.target.files[0])
+      setError(null)
     }
   }
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
     setProcessing(true)
-    setDebugInfo(null)
-    setNoHighlights(false)
+    setError(null)
+    setDownloadUrl(null)
     
     const formData = new FormData()
     
@@ -36,14 +40,20 @@ export default function Home() {
         headers: { 'Content-Type': 'multipart/form-data' },
       })
       
-      setDownloadUrl(response.data.downloadUrl)
-      setNoHighlights(response.data.noHighlights || false)
-      if (response.data.debug) {
-        setDebugInfo(response.data.debug.stdout)
+      if (response.data.downloadUrl) {
+        setDownloadUrl(response.data.downloadUrl)
       }
     } catch (error) {
-      console.error('Error processing video:', error)
-      setDebugInfo(error instanceof Error ? error.message : 'An error occurred')
+      if (axios.isAxiosError(error) && error.response) {
+        setError({
+          message: error.response.data.error || 'An error occurred while processing the video',
+          instructions: error.response.data.instructions
+        })
+      } else {
+        setError({
+          message: 'An unexpected error occurred'
+        })
+      }
     } finally {
       setProcessing(false)
     }
@@ -88,9 +98,23 @@ export default function Home() {
         </button>
       </form>
 
-      {noHighlights && (
-        <div className="mt-4 p-4 bg-yellow-100 text-yellow-800 rounded-lg w-full max-w-md">
-          No significant highlights found. The original video is available for download.
+      {error && (
+        <div className="mt-4 p-4 bg-red-50 border border-red-200 rounded-lg w-full max-w-md">
+          <div className="flex items-center gap-2 text-red-700 mb-2">
+            <AlertCircle className="h-5 w-5" />
+            <h3 className="font-semibold">Error</h3>
+          </div>
+          <p className="text-red-600 mb-2">{error.message}</p>
+          {error.instructions && (
+            <div className="text-sm text-red-600">
+              <p className="font-semibold mb-1">To fix this:</p>
+              <ul className="list-disc pl-5 space-y-1">
+                {error.instructions.map((instruction, index) => (
+                  <li key={index}>{instruction}</li>
+                ))}
+              </ul>
+            </div>
+          )}
         </div>
       )}
 
@@ -102,13 +126,6 @@ export default function Home() {
         >
           Download Video
         </a>
-      )}
-
-      {debugInfo && (
-        <div className="mt-4 p-4 bg-gray-100 rounded-lg w-full max-w-md">
-          <h2 className="font-semibold mb-2">Debug Information:</h2>
-          <pre className="whitespace-pre-wrap text-sm">{debugInfo}</pre>
-        </div>
       )}
     </main>
   )
