@@ -24,31 +24,37 @@ def process_video(input_path, debug=True):
         output_path = os.path.join(os.path.dirname(input_path), f"{base_name}_highlights.mp4")
         temp_output = os.path.join(os.path.dirname(input_path), f"{base_name}_temp.mp4")
 
-        # Step 1: Detect faces and output to JSON
-        face_detection_cmd = [
+        # Step 1: Detect scene changes
+        scene_detection_cmd = [
             'ffmpeg',
             '-i', input_path,
-            '-vf', "select='gt(scene,0.001)',select='eq(pict_type,I)',scale=640:360,fps=1,select='not(mod(n,3))',showinfo,select='isnan(prev_selected_t)+gte(t-prev_selected_t,0.5)+lte(t-prev_selected_t,3)',face=frequency=10:search_scale=5:minsize=32,metadata=print:file=-",
+            '-vf', "select='gt(scene,0.3)',showinfo",
             '-f', 'null',
             '-'
         ]
 
-        face_detection_result = subprocess.run(face_detection_cmd, capture_output=True, text=True)
-        face_data = face_detection_result.stderr
+        print("Running scene detection command:")
+        print(" ".join(scene_detection_cmd))
+        scene_detection_result = subprocess.run(scene_detection_cmd, capture_output=True, text=True)
+        scene_data = scene_detection_result.stderr
 
-        # Parse face detection data
-        face_timestamps = []
-        for line in face_data.split('\n'):
-            if 'pts_time' in line and 'face detected' in line:
+        # Parse scene detection data
+        scene_timestamps = []
+        for line in scene_data.split('\n'):
+            if 'pts_time' in line:
                 timestamp = float(line.split('pts_time:')[1].split()[0])
-                face_timestamps.append(timestamp)
+                scene_timestamps.append(timestamp)
 
-        if not face_timestamps:
-            print("No faces detected in the video.")
-            return None
+        print(f"Detected {len(scene_timestamps)} scene changes at timestamps: {scene_timestamps}")
+
+        if not scene_timestamps:
+            print("No scene changes detected in the video.")
+            print("Returning the original video.")
+            subprocess.run(['ffmpeg', '-i', input_path, '-c', 'copy', output_path])
+            return output_path
 
         # Step 2: Create highlight clips
-        highlight_filter = '+'.join([f"between(t,{t},{t+1})" for t in face_timestamps])
+        highlight_filter = '+'.join([f"between(t,{t},{t+3})" for t in scene_timestamps[:10]])  # Limit to 10 scenes
         highlight_cmd = [
             'ffmpeg',
             '-i', input_path,
@@ -58,6 +64,8 @@ def process_video(input_path, debug=True):
             temp_output
         ]
 
+        print("Running highlight creation command:")
+        print(" ".join(highlight_cmd))
         subprocess.run(highlight_cmd, check=True)
 
         # Step 3: Optimize for compatibility
@@ -74,17 +82,21 @@ def process_video(input_path, debug=True):
             output_path
         ]
 
+        print("Running optimization command:")
+        print(" ".join(optimize_cmd))
         subprocess.run(optimize_cmd, check=True)
 
         # Clean up temporary file
-        os.remove(temp_output)
+        if os.path.exists(temp_output):
+            os.remove(temp_output)
 
         # Verify output file
         if os.path.exists(output_path) and os.path.getsize(output_path) > 1000:
             print(f"Highlights saved to: {output_path}")
+            print(f"Output file size: {os.path.getsize(output_path)} bytes")
             return output_path
         else:
-            print("Error: Output file is invalid or too small")
+            print(f"Error: Output file is invalid or too small. Size: {os.path.getsize(output_path)} bytes")
             return None
 
     except subprocess.CalledProcessError as e:
@@ -103,7 +115,7 @@ if __name__ == "__main__":
     output_path = process_video(input_path, debug=True)
     
     if output_path:
-        print(f"Highlights saved to: {output_path}")
+        print(f"Video saved to: {output_path}")
     else:
-        print("No significant highlights found or error occurred. Original video returned.")
+        print("Error occurred during video processing.")
 

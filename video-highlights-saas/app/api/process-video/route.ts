@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { writeFile, mkdir, copyFile } from 'fs/promises'
+import { writeFile, mkdir, copyFile, stat } from 'fs/promises'
 import { join, basename } from 'path'
 import { exec } from 'child_process'
 import { promisify } from 'util'
@@ -18,7 +18,7 @@ async function ensureTestVideo() {
   if (!existsSync(testVideoPath)) {
     try {
       await execAsync(
-        'ffmpeg -f lavfi -i testsrc=duration=5:size=1280x720:rate=30 ' +
+        'ffmpeg -f lavfi -i testsrc=duration=30:size=1280x720:rate=30 ' +
         '-vf "drawtext=text=\'Test Video\':fontsize=60:fontcolor=white:x=(w-text_w)/2:y=(h-text_h)/2" ' +
         `-y "${testVideoPath}"`
       )
@@ -58,6 +58,7 @@ export async function POST(req: NextRequest) {
         videoPath = join(tmpDir, originalFilename)
         await copyFile(testVideoPath, videoPath)
       } catch (error) {
+        console.error('Failed to setup test video:', error)
         return NextResponse.json(
           { 
             success: false, 
@@ -85,6 +86,7 @@ export async function POST(req: NextRequest) {
     }
 
     try {
+      console.log(`Processing video: ${videoPath}`)
       const { stdout, stderr } = await execAsync(`python process_video_debug.py "${videoPath}"`)
       console.log('Processing output:', stdout)
       if (stderr) console.error('Processing errors:', stderr)
@@ -93,26 +95,37 @@ export async function POST(req: NextRequest) {
       const highlightsPath = join(tmpDir, highlightsFilename)
       
       if (existsSync(highlightsPath)) {
-        return NextResponse.json({ 
-          success: true, 
-          downloadUrl: `/api/download?file=${encodeURIComponent(highlightsFilename)}`,
-          debug: {
-            stdout,
-            stderr
-          }
-        })
+        const stats = await stat(highlightsPath)
+        console.log(`Highlights file size: ${stats.size} bytes`)
+        if (stats.size > 1000) {
+          return NextResponse.json({ 
+            success: true, 
+            downloadUrl: `/api/download?file=${encodeURIComponent(highlightsFilename)}`,
+            debug: {
+              stdout,
+              stderr
+            }
+          })
+        } else {
+          console.error('Generated file is too small:', stats.size, 'bytes')
+        }
       } else {
-        return NextResponse.json({ 
-          success: true, 
-          noHighlights: true,
-          message: "No significant highlights found or error occurred. Original video returned.",
-          downloadUrl: `/api/download?file=${encodeURIComponent(originalFilename)}`,
-          debug: {
-            stdout,
-            stderr
-          }
-        })
+        console.error('Highlights file not found:', highlightsPath)
       }
+      
+      // If we reach here, either the file doesn't exist or is too small
+      // Return the original video instead
+      console.log('Returning original video')
+      return NextResponse.json({ 
+        success: true, 
+        noHighlights: true,
+        message: "No significant highlights found. Original video returned.",
+        downloadUrl: `/api/download?file=${encodeURIComponent(originalFilename)}`,
+        debug: {
+          stdout,
+          stderr
+        }
+      })
     } catch (error) {
       console.error('Error processing video:', error)
       return NextResponse.json(

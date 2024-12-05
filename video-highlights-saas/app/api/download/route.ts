@@ -26,6 +26,15 @@ export async function GET(req: NextRequest) {
 
     try {
       const stats = statSync(filePath)
+      
+      if (stats.size <= 1000) {
+        console.error('File is too small:', stats.size, 'bytes')
+        return NextResponse.json(
+          { error: 'File is invalid or too small' },
+          { status: 500 }
+        )
+      }
+
       const stream = createReadStream(filePath)
 
       return new NextResponse(stream, {
