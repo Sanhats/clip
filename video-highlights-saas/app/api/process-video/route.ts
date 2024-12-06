@@ -18,7 +18,7 @@ async function ensureTestVideo() {
   if (!existsSync(testVideoPath)) {
     try {
       await execAsync(
-        'ffmpeg -f lavfi -i testsrc=duration=30:size=1280x720:rate=30 ' +
+        'ffmpeg -f lavfi -i testsrc=duration=120:size=1280x720:rate=30 ' +
         '-vf "drawtext=text=\'Test Video\':fontsize=60:fontcolor=white:x=(w-text_w)/2:y=(h-text_h)/2" ' +
         `-y "${testVideoPath}"`
       )
@@ -119,7 +119,7 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ 
         success: true, 
         noHighlights: true,
-        message: "No significant highlights found. Original video returned.",
+        message: "Failed to generate highlights. Original video returned.",
         downloadUrl: `/api/download?file=${encodeURIComponent(originalFilename)}`,
         debug: {
           stdout,
